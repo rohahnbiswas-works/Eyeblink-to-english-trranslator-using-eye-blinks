@@ -1,0 +1,217 @@
+int buzzerPin = 2;
+int buzzerFreq = 1000;
+int ledPin = 13;
+int buttonInputPin = A0;
+
+int debounceDelayMs = 30;
+int unitTime = 240;  
+int intraCharGap = unitTime;  
+int dashTime = unitTime * 3;
+int interLetterGap = unitTime * 3;
+int interWordGap = unitTime * 7;
+
+float wordsPerMinute = 1200.0 / unitTime;
+
+int pressStart, pressEnd, pressDuration, timeSinceLast;
+bool isNewLetter, isNewWord, foundCharacter, serialInputMode;
+int charsOnLine = 0;
+int maxCharsPerLine = 20;
+
+char* morseLetters[] = {
+  ".-", "-...", "-.-.", "-..", ".", "..-.", "--.", "....", "..", 
+  ".---", "-.-", ".-..", "--", "-.", "---", ".--.", "--.-", ".-.", 
+  "...", "-", "..-", "...-", ".--", "-..-", "-.--", "--.." 
+};
+
+char* morseNumbers[] = {
+  "-----", ".----", "..---", "...--", "....-", 
+  ".....", "-....", "--...", "---..", "----."
+};
+
+String currentMorse = "";
+char decodedChar, serialChar;
+int i, index;
+
+void setup() {
+  delay(500);
+  pinMode(ledPin, OUTPUT);
+  pinMode(buzzerPin, OUTPUT);
+  pinMode(buttonInputPin, INPUT_PULLUP);
+
+  Serial.begin(9600);
+  Serial.println("\n-------------------------------");
+  Serial.println("Morse Code Decoder/Encoder");
+  Serial.print("Speed = ");
+  Serial.print(wordsPerMinute);
+  Serial.print(" wpm, dot = ");
+  Serial.print(unitTime);
+  Serial.println(" ms");
+
+  // LED + Buzzer Test
+  tone(buzzerPin, buzzerFreq);
+  digitalWrite(ledPin, HIGH);
+  delay(2000);
+  digitalWrite(ledPin, LOW);
+  noTone(buzzerPin);
+  delay(600);
+
+  // Show sample A, B, C
+  Serial.print("A .- ");
+  index = 'A' - 65;
+  flashMorsePattern(morseLetters[index]);
+  delay(interWordGap);
+
+  Serial.print("B -... ");
+  index = 'B' - 65;
+  flashMorsePattern(morseLetters[index]);
+  delay(interWordGap);
+
+  Serial.print("C -.-. ");
+  index = 'C' - 65;
+  flashMorsePattern(morseLetters[index]);
+  delay(interWordGap);
+
+  Serial.println("\nType text or press button to key Morse:");
+  isNewLetter = false;
+  isNewWord = false;
+  serialInputMode = false;
+}
+
+void loop() {
+  // --- Serial Text to Morse Encoding ---
+  if (Serial.available() > 0) {
+    if (!serialInputMode) {
+      Serial.println();
+    }
+    serialInputMode = true;
+    serialChar = Serial.read();
+
+    if (serialChar >= 'a' && serialChar <= 'z') {
+      serialChar -= 32; // make uppercase
+    }
+
+    if (serialChar >= 'A' && serialChar <= 'Z') {
+      Serial.print(serialChar);
+      Serial.print(" ");
+      Serial.println(morseLetters[serialChar - 'A']);
+      flashMorsePattern(morseLetters[serialChar - 'A']);
+      delay(interLetterGap);
+    }
+    if (serialChar >= '0' && serialChar <= '9') {
+      Serial.print(serialChar);
+      Serial.print(" ");
+      Serial.println(morseNumbers[serialChar - '0']);
+      flashMorsePattern(morseNumbers[serialChar - '0']);
+      delay(interLetterGap);
+    }
+    if (serialChar == ' ') {
+      Serial.println("_");
+      delay(interWordGap);
+    }
+
+    if (Serial.available() <= 0) {
+      Serial.println("\nEnter text or Key in:");
+      serialInputMode = false;
+    }
+  }
+
+  // --- Button Input (Manual Morse Keying) ---
+  if (digitalRead(buttonInputPin) == LOW) {
+    isNewLetter = true;
+    isNewWord = true;
+    pressStart = millis();
+
+    digitalWrite(ledPin, HIGH);
+    tone(buzzerPin, buzzerFreq);
+    delay(debounceDelayMs);
+
+    while (digitalRead(buttonInputPin) == LOW) {
+      delay(debounceDelayMs);
+    }
+    delay(debounceDelayMs);
+
+    pressEnd = millis();
+    pressDuration = pressEnd - pressStart;
+
+    digitalWrite(ledPin, LOW);
+    noTone(buzzerPin);
+
+    if (pressDuration <= unitTime * 1.5) {
+      currentMorse += ".";
+    } else {
+      currentMorse += "-";
+    }
+  }
+
+  // --- Detect End of Letter ---
+  timeSinceLast = millis() - pressEnd;
+  if (isNewLetter && timeSinceLast >= interLetterGap) {
+    foundCharacter = false;
+    decodedChar = '?';
+
+    for (i = 0; i <= 25; i++) {
+      if (currentMorse == morseLetters[i]) {
+        decodedChar = i + 65; // ASCII A-Z
+        foundCharacter = true;
+        break;
+      }
+    }
+
+    if (!foundCharacter) {
+      for (i = 0; i <= 9; i++) {
+        if (currentMorse == morseNumbers[i]) {
+          decodedChar = i + 48; // ASCII 0-9
+          foundCharacter = true;
+          break;
+        }
+      }
+    }
+
+    Serial.print(decodedChar);
+    if (!foundCharacter) {
+      tone(buzzerPin, 100, 500); // error tone
+    }
+
+    isNewLetter = false;
+    currentMorse = "";
+    charsOnLine++;
+  }
+
+  // --- Detect End of Word ---
+  if (isNewWord && timeSinceLast >= interWordGap * 1.5) {
+    isNewWord = false;
+    Serial.print("_");
+    charsOnLine++;
+
+    digitalWrite(ledPin, HIGH);
+    delay(25);
+    digitalWrite(ledPin, LOW);
+  }
+
+  // --- Line Wrapping ---
+  if (charsOnLine >= maxCharsPerLine) {
+    Serial.println();
+    charsOnLine = 0;
+  }
+}
+
+void flashMorsePattern(char* pattern) {
+  int i = 0;
+  while (pattern[i] == '.' || pattern[i] == '-') {
+    flashDotOrDash(pattern[i]);
+    i++;
+  }
+}
+
+void flashDotOrDash(char symbol) {
+  digitalWrite(ledPin, HIGH);
+  tone(buzzerPin, buzzerFreq);
+  if (symbol == '.') {
+    delay(unitTime);
+  } else {
+    delay(dashTime);
+  }
+  digitalWrite(ledPin, LOW);
+  noTone(buzzerPin);
+  delay(unitTime);
+}
